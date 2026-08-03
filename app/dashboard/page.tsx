@@ -47,7 +47,7 @@ function DashboardContent() {
         async function fetchDashboardStats() {
             try {
                 const [inHouseRes, fartayaRes, auditRes] = await Promise.all([
-                    supabase.from("in_house_orders").select("order_amount, bounce_amount").eq("is_deleted", false),
+                    supabase.from("in_house_orders").select("order_quantity, price, bounce_units").eq("is_deleted", false),
                     supabase.from("fartaya_drs").select("order_amount, payment_status").eq("is_deleted", false),
                     supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(5),
                 ]);
@@ -57,7 +57,11 @@ function DashboardContent() {
 
                 let revenue = 0;
                 inHouseData.forEach((item) => {
-                    revenue += Number(item.order_amount || 0) - Number(item.bounce_amount || 0);
+                    const qty = Number(item.order_quantity || 0);
+                    const price = Number(item.price || 0);
+                    const bounce = Number(item.bounce_units || 0);
+                    const net = Math.max(0, (qty - bounce) * price);
+                    revenue += net;
                 });
 
                 let unpaidSum = 0;
