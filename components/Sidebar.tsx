@@ -76,7 +76,7 @@ export default function Sidebar() {
                             <h2 className="font-bold text-white tracking-tight leading-tight">
                                 MedOrder System
                             </h2>
-                            <p className="text-xs text-zinc-400">Medical Order Management</p>
+                            <p className="text-xs text-emerald-400 font-medium">v2.0 • Medical Orders</p>
                         </div>
                     </div>
 

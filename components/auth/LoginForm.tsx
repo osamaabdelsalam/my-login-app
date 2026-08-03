@@ -47,9 +47,15 @@ export default function LoginForm() {
     return (
         <div className="rounded-2xl border border-white/10 bg-white/5 p-8 shadow-2xl backdrop-blur-xl">
             <div className="mb-8 text-center">
-                <div className="logo flex items-center justify-center gap-3 mb-4">
+                <div className="logo flex items-center justify-center gap-3 mb-2">
                     <span className="text-3xl">🩺</span>
                     <span className="text-2xl font-bold tracking-tight text-white">MedOrder System</span>
+                </div>
+
+                <div className="mb-4">
+                    <span className="inline-block rounded-full bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-400">
+                        v2.0 System Live
+                    </span>
                 </div>
 
                 <h1 className="text-xl font-semibold tracking-tight text-zinc-200">
