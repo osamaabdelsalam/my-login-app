@@ -23,10 +23,11 @@ export default function SettingsPage() {
 
 function SettingsContent() {
     const [products, setProducts] = useState<ProductSetting[]>([
-        { id: "1", name: "Hyalone", value: "Hyalone", is_active: true },
-        { id: "2", name: "Hyalubrix", value: "Hyalubrix", is_active: true },
+        { id: "1", name: "Hyalone", value: "Hyalone", price: 2610, is_active: true },
+        { id: "2", name: "Hyalubrix", value: "Hyalubrix", price: 1305, is_active: true },
     ]);
     const [newProductName, setNewProductName] = useState("");
+    const [newProductPrice, setNewProductPrice] = useState<number | "">(2000);
 
     const [companyInfo, setCompanyInfo] = useState<CompanyInfoSetting>({
         name: "Medical Order Management Corp",
@@ -86,6 +87,7 @@ function SettingsContent() {
             id: Date.now().toString(),
             name: newProductName.trim(),
             value: newProductName.trim(),
+            price: typeof newProductPrice === "number" ? newProductPrice : 0,
             is_active: true,
         };
         setProducts([...products, newProd]);

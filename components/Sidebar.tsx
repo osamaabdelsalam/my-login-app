@@ -67,14 +67,14 @@ export default function Sidebar() {
                 <div>
                     {/* Header */}
                     <div className="p-6 border-b border-white/10 flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-zinc-950 font-bold text-xl shadow-lg">
-                            M
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/10 border border-teal-500/20 text-2xl shadow-lg">
+                            🩺
                         </div>
                         <div>
                             <h2 className="font-bold text-white tracking-tight leading-tight">
-                                Medical Orders
+                                MedOrder System
                             </h2>
-                            <p className="text-xs text-zinc-400">Order Management</p>
+                            <p className="text-xs text-zinc-400">Medical Order Management</p>
                         </div>
                     </div>
 

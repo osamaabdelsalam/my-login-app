@@ -34,15 +34,16 @@ CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- 3. In-House Orders Table
+-- 3. In-House Orders Table (with Product Selection: Hyalone=2610, Hyalubrix=1305, and Bounce as Units)
 CREATE TABLE IF NOT EXISTS public.in_house_orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_number BIGSERIAL UNIQUE,
     dr_name TEXT NOT NULL,
-    product_name TEXT NOT NULL CHECK (product_name IN ('Hyalone', 'Hyalubrix')),
+    product_name TEXT NOT NULL,
     order_quantity INT NOT NULL CHECK (order_quantity > 0),
     price NUMERIC(10, 2) NOT NULL CHECK (price >= 0),
     order_amount NUMERIC(12, 2) GENERATED ALWAYS AS (order_quantity * price) STORED,
+    bounce_units INT NOT NULL DEFAULT 0 CHECK (bounce_units >= 0),
     bounce_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (bounce_amount >= 0),
     remaining_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS public.fartaya_drs (
     invoice_generated BOOLEAN NOT NULL DEFAULT FALSE,
     invoice_number TEXT,
     invoice_date TIMESTAMPTZ,
+    invoice_url TEXT,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -104,14 +106,14 @@ CREATE TABLE IF NOT EXISTS public.settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Seed Default Settings
+-- Seed Default Settings with Product Prices (Hyalone=2610, Hyalubrix=1305)
 INSERT INTO public.settings (setting_key, setting_value, category, description)
 VALUES 
 (
     'products', 
-    '[{"id": "p1", "name": "Hyalone", "value": "Hyalone", "is_active": true}, {"id": "p2", "name": "Hyalubrix", "value": "Hyalubrix", "is_active": true}]'::jsonb, 
+    '[{"id": "p1", "name": "Hyalone", "value": "Hyalone", "price": 2610, "is_active": true}, {"id": "p2", "name": "Hyalubrix", "value": "Hyalubrix", "price": 1305, "is_active": true}]'::jsonb, 
     'products', 
-    'List of available products for orders'
+    'List of available products with default prices'
 ),
 (
     'company_info', 
@@ -131,9 +133,18 @@ VALUES
     'payments', 
     'Accepted payment methods'
 )
-ON CONFLICT (setting_key) DO NOTHING;
+ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value;
 
--- 7. Indices for Performance
+-- 7. Storage Bucket setup for Invoices
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('invoices', 'invoices', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Storage RLS Policies for Invoices Bucket
+CREATE POLICY "Public Read Invoices" ON storage.objects FOR SELECT USING (bucket_id = 'invoices');
+CREATE POLICY "Authenticated Upload Invoices" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'invoices' AND auth.uid() IS NOT NULL);
+
+-- 8. Indices for Performance
 CREATE INDEX IF NOT EXISTS idx_in_house_orders_user ON public.in_house_orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_in_house_orders_created ON public.in_house_orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fartaya_drs_original ON public.fartaya_drs(original_order_id);
@@ -142,15 +153,13 @@ CREATE INDEX IF NOT EXISTS idx_fartaya_drs_created ON public.fartaya_drs(created
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON public.audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON public.audit_logs(created_at DESC);
 
--- 8. Row Level Security (RLS) Policies
-
+-- 9. Row Level Security (RLS) Policies
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.in_house_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fartaya_drs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
 
--- Helper function to check if current user is super_admin
 CREATE OR REPLACE FUNCTION public.is_super_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
@@ -161,40 +170,21 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Users RLS
-CREATE POLICY "Users view self or super admin" ON public.users 
-    FOR SELECT USING (auth.uid() = id OR public.is_super_admin());
-CREATE POLICY "Super admin manage users" ON public.users 
-    FOR ALL USING (public.is_super_admin());
+CREATE POLICY "Users view self or super admin" ON public.users FOR SELECT USING (auth.uid() = id OR public.is_super_admin());
+CREATE POLICY "Super admin manage users" ON public.users FOR ALL USING (public.is_super_admin());
 
--- In-House Orders RLS
-CREATE POLICY "Users can select all in_house_orders" ON public.in_house_orders 
-    FOR SELECT USING (TRUE);
-CREATE POLICY "Users insert own in_house_orders" ON public.in_house_orders 
-    FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_super_admin());
-CREATE POLICY "Users update own in_house_orders" ON public.in_house_orders 
-    FOR UPDATE USING (auth.uid() = user_id OR public.is_super_admin());
-CREATE POLICY "Users delete own in_house_orders" ON public.in_house_orders 
-    FOR DELETE USING (auth.uid() = user_id OR public.is_super_admin());
+CREATE POLICY "Users select all in_house_orders" ON public.in_house_orders FOR SELECT USING (TRUE);
+CREATE POLICY "Users insert own in_house_orders" ON public.in_house_orders FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_super_admin());
+CREATE POLICY "Users update own in_house_orders" ON public.in_house_orders FOR UPDATE USING (auth.uid() = user_id OR public.is_super_admin());
+CREATE POLICY "Users delete own in_house_orders" ON public.in_house_orders FOR DELETE USING (auth.uid() = user_id OR public.is_super_admin());
 
--- Fartaya Drs RLS
-CREATE POLICY "Users can select all fartaya_drs" ON public.fartaya_drs 
-    FOR SELECT USING (TRUE);
-CREATE POLICY "Users insert own fartaya_drs" ON public.fartaya_drs 
-    FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_super_admin());
-CREATE POLICY "Users update own fartaya_drs" ON public.fartaya_drs 
-    FOR UPDATE USING (auth.uid() = user_id OR public.is_super_admin());
-CREATE POLICY "Users delete own fartaya_drs" ON public.fartaya_drs 
-    FOR DELETE USING (auth.uid() = user_id OR public.is_super_admin());
+CREATE POLICY "Users select all fartaya_drs" ON public.fartaya_drs FOR SELECT USING (TRUE);
+CREATE POLICY "Users insert own fartaya_drs" ON public.fartaya_drs FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_super_admin());
+CREATE POLICY "Users update own fartaya_drs" ON public.fartaya_drs FOR UPDATE USING (auth.uid() = user_id OR public.is_super_admin());
+CREATE POLICY "Users delete own fartaya_drs" ON public.fartaya_drs FOR DELETE USING (auth.uid() = user_id OR public.is_super_admin());
 
--- Audit Logs RLS
-CREATE POLICY "Super admin select audit_logs" ON public.audit_logs 
-    FOR SELECT USING (public.is_super_admin());
-CREATE POLICY "All authenticated users insert audit_logs" ON public.audit_logs 
-    FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+CREATE POLICY "Super admin select audit_logs" ON public.audit_logs FOR SELECT USING (public.is_super_admin());
+CREATE POLICY "All authenticated users insert audit_logs" ON public.audit_logs FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
--- Settings RLS
-CREATE POLICY "All authenticated users select settings" ON public.settings 
-    FOR SELECT USING (auth.uid() IS NOT NULL);
-CREATE POLICY "Super admin write settings" ON public.settings 
-    FOR ALL USING (public.is_super_admin());
+CREATE POLICY "All authenticated users select settings" ON public.settings FOR SELECT USING (auth.uid() IS NOT NULL);
+CREATE POLICY "Super admin write settings" ON public.settings FOR ALL USING (public.is_super_admin());

@@ -110,10 +110,26 @@ export async function generateInvoicePDF(fartayaOrder: FartayaOrder): Promise<st
     doc.setTextColor(148, 163, 184);
     doc.text("Thank you for your business!", 14, finalY + 20);
 
-    const pdfBlob = doc.output("blob");
-
     // Save to browser download directly
     doc.save(`${invoiceNumber}.pdf`);
+
+    // Upload PDF to Supabase Storage bucket 'invoices'
+    let publicUrl: string | null = null;
+    try {
+        const pdfBlob = doc.output("blob");
+        const filePath = `${invoiceNumber}.pdf`;
+
+        const { error: uploadError } = await supabase.storage
+            .from("invoices")
+            .upload(filePath, pdfBlob, { upsert: true, contentType: "application/pdf" });
+
+        if (!uploadError) {
+            const { data: urlData } = supabase.storage.from("invoices").getPublicUrl(filePath);
+            publicUrl = urlData.publicUrl;
+        }
+    } catch (e) {
+        console.warn("Storage bucket upload skipped/failed:", e);
+    }
 
     // Update fartaya_drs record in Supabase
     try {
@@ -124,6 +140,7 @@ export async function generateInvoicePDF(fartayaOrder: FartayaOrder): Promise<st
                 invoice_generated: true,
                 invoice_number: invoiceNumber,
                 invoice_date: now,
+                invoice_url: publicUrl,
             })
             .eq("id", fartayaOrder.id);
 
@@ -132,7 +149,7 @@ export async function generateInvoicePDF(fartayaOrder: FartayaOrder): Promise<st
             "fartaya_drs",
             fartayaOrder.id,
             { invoice_generated: fartayaOrder.invoice_generated },
-            { invoice_generated: true, invoice_number: invoiceNumber, invoice_date: now }
+            { invoice_generated: true, invoice_number: invoiceNumber, invoice_date: now, invoice_url: publicUrl }
         );
     } catch (e) {
         console.error("Failed to update database record for invoice:", e);

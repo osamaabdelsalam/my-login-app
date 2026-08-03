@@ -19,6 +19,7 @@ export interface InHouseOrder {
     order_quantity: number;
     price: number;
     order_amount: number;
+    bounce_units: number;
     bounce_amount: number;
     remaining_amount: number;
     is_deleted: boolean;
@@ -48,6 +49,7 @@ export interface FartayaOrder {
     invoice_generated: boolean;
     invoice_number?: string | null;
     invoice_date?: string | null;
+    invoice_url?: string | null;
     is_deleted: boolean;
     user_id: string;
     created_at: string;
@@ -60,8 +62,8 @@ export interface AuditLog {
     action_type: string;
     table_name: string;
     record_id?: string | null;
-    old_values?: Record<string, unknown> | null;
-    new_values?: Record<string, unknown> | null;
+    old_values?: unknown;
+    new_values?: unknown;
     ip_address?: string | null;
     user_agent?: string | null;
     browser_info?: string | null;
@@ -73,6 +75,7 @@ export interface ProductSetting {
     id: string;
     name: string;
     value: string;
+    price: number;
     is_active: boolean;
 }
 
