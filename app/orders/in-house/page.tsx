@@ -88,17 +88,21 @@ function InHouseOrdersContent() {
     }
 
     function handleExportCSV() {
-        const exportData = filteredOrders.map((o) => ({
-            "Order Number": o.order_number,
-            Doctor: o.dr_name,
-            Product: o.product_name,
-            Quantity: o.order_quantity,
-            Price: o.price,
-            "Order Amount": o.order_amount,
-            Bounce: o.bounce_amount,
-            "Remaining Amount": o.remaining_amount,
-            Date: formatDate(o.created_at),
-        }));
+        const exportData = filteredOrders.map((o) => {
+            const net = Math.max(0, (o.order_quantity - (o.bounce_units || 0)) * o.price);
+            return {
+                "Order Number": o.order_number,
+                Doctor: o.dr_name,
+                Product: o.product_name,
+                Quantity: o.order_quantity,
+                Price: o.price,
+                "Order Amount": o.order_amount,
+                "Bounce Units": o.bounce_units || 0,
+                "Net Amount": net,
+                "Remaining Amount": o.remaining_amount,
+                Date: formatDate(o.created_at),
+            };
+        });
         exportToCSV("in_house_orders", exportData);
     }
 
@@ -146,8 +150,8 @@ function InHouseOrdersContent() {
                             <th className="px-6 py-4">Doctor Name</th>
                             <th className="px-6 py-4">Product</th>
                             <th className="px-6 py-4">Qty x Price</th>
-                            <th className="px-6 py-4">Total Amount</th>
-                            <th className="px-6 py-4">Bounce</th>
+                            <th className="px-6 py-4">Bounce Units</th>
+                            <th className="px-6 py-4">Net Amount</th>
                             <th className="px-6 py-4">Remaining Balance</th>
                             <th className="px-6 py-4">Date</th>
                             <th className="px-6 py-4 text-right">Actions</th>
@@ -167,31 +171,33 @@ function InHouseOrdersContent() {
                                 </td>
                             </tr>
                         ) : (
-                            filteredOrders.map((order) => (
-                                <tr key={order.id} className="hover:bg-white/5 transition">
-                                    <td className="px-6 py-4 font-mono font-semibold text-white">
-                                        #{order.order_number}
-                                    </td>
-                                    <td className="px-6 py-4 font-medium text-white">
-                                        Dr. {order.dr_name}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className="inline-block rounded-md bg-white/10 px-2.5 py-1 text-xs font-medium text-white">
-                                            {order.product_name}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        {order.order_quantity} x {formatCurrency(order.price)}
-                                    </td>
-                                    <td className="px-6 py-4 font-medium text-white">
-                                        {formatCurrency(order.order_amount)}
-                                    </td>
-                                    <td className="px-6 py-4 text-amber-400">
-                                        {formatCurrency(order.bounce_amount)}
-                                    </td>
-                                    <td className="px-6 py-4 font-bold text-emerald-400">
-                                        {formatCurrency(order.remaining_amount)}
-                                    </td>
+                            filteredOrders.map((order) => {
+                                const net = Math.max(0, (order.order_quantity - (order.bounce_units || 0)) * order.price);
+                                return (
+                                    <tr key={order.id} className="hover:bg-white/5 transition">
+                                        <td className="px-6 py-4 font-mono font-semibold text-white">
+                                            #{order.order_number}
+                                        </td>
+                                        <td className="px-6 py-4 font-medium text-white">
+                                            Dr. {order.dr_name}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className="inline-block rounded-md bg-white/10 px-2.5 py-1 text-xs font-medium text-white">
+                                                {order.product_name}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {order.order_quantity} x {formatCurrency(order.price)}
+                                        </td>
+                                        <td className="px-6 py-4 text-amber-400 font-medium">
+                                            {order.bounce_units || 0} units
+                                        </td>
+                                        <td className="px-6 py-4 font-medium text-white">
+                                            {formatCurrency(net)}
+                                        </td>
+                                        <td className="px-6 py-4 font-bold text-emerald-400">
+                                            {formatCurrency(order.remaining_amount)}
+                                        </td>
                                     <td className="px-6 py-4 text-zinc-400 text-xs">
                                         {formatDate(order.created_at)}
                                     </td>
@@ -222,8 +228,9 @@ function InHouseOrdersContent() {
                                             )}
                                         </div>
                                     </td>
-                                </tr>
-                            ))
+                                 </tr>
+                                );
+                            })
                         )}
                     </tbody>
                 </table>

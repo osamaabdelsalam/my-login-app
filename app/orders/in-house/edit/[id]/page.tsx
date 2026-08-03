@@ -35,7 +35,7 @@ function EditInHouseOrderForm() {
     const [productName, setProductName] = useState("Hyalone");
     const [quantity, setQuantity] = useState<number | "">(1);
     const [price, setPrice] = useState<number | "">(100);
-    const [bounceAmount, setBounceAmount] = useState<number | "">(0);
+    const [bounceUnits, setBounceUnits] = useState<number | "">(0);
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -67,7 +67,7 @@ function EditInHouseOrderForm() {
                 setProductName(order.product_name);
                 setQuantity(order.order_quantity);
                 setPrice(order.price);
-                setBounceAmount(order.bounce_amount);
+                setBounceUnits(order.bounce_units || 0);
             } catch (err) {
                 console.error("Failed to load order:", err);
                 setError("Order not found or permission denied.");
@@ -80,10 +80,11 @@ function EditInHouseOrderForm() {
 
     const qtyNum = Number(quantity) || 0;
     const priceNum = Number(price) || 0;
-    const bounceNum = Number(bounceAmount) || 0;
+    const bounceUnitsNum = Number(bounceUnits) || 0;
 
     const orderAmount = qtyNum * priceNum;
-    const remainingAmount = Math.max(0, orderAmount - bounceNum);
+    const netAmount = Math.max(0, (qtyNum - bounceUnitsNum) * priceNum);
+    const remainingAmount = netAmount;
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -98,7 +99,8 @@ function EditInHouseOrderForm() {
                 product_name: productName,
                 order_quantity: qtyNum,
                 price: priceNum,
-                bounce_amount: bounceNum,
+                bounce_units: bounceUnitsNum,
+                bounce_amount: 0,
                 remaining_amount: remainingAmount,
                 updated_at: new Date().toISOString(),
             };
@@ -207,16 +209,15 @@ function EditInHouseOrderForm() {
                         </div>
 
                         <div>
-                            <label htmlFor="bounceAmount" className="block text-sm font-medium text-zinc-300 mb-2">
-                                Bounce / Discount Amount ($)
+                            <label htmlFor="bounceUnits" className="block text-sm font-medium text-zinc-300 mb-2">
+                                Bounce (Bonus Units)
                             </label>
                             <input
-                                id="bounceAmount"
+                                id="bounceUnits"
                                 type="number"
-                                step="0.01"
                                 min="0"
-                                value={bounceAmount}
-                                onChange={(e) => setBounceAmount(e.target.value === "" ? "" : Number(e.target.value))}
+                                value={bounceUnits}
+                                onChange={(e) => setBounceUnits(e.target.value === "" ? "" : Number(e.target.value))}
                                 className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-white outline-none focus:border-white/30"
                             />
                         </div>
@@ -229,10 +230,10 @@ function EditInHouseOrderForm() {
                             <span className="font-semibold text-white">{formatCurrency(orderAmount)}</span>
                         </div>
                         <div className="flex justify-between text-zinc-400">
-                            <span>Bounce Deduction:</span>
-                            <span className="font-semibold text-amber-400">-{formatCurrency(bounceNum)}</span>
+                            <span>Net Amount:</span>
+                            <span className="font-semibold text-emerald-400">{formatCurrency(netAmount)}</span>
                         </div>
-                        <div className="border-t border-white/10 pt-2 flex justify-between text-base font-bold text-emerald-400">
+                        <div className="border-t border-white/10 pt-2 flex justify-between text-base font-bold text-indigo-300">
                             <span>Recalculated Remaining Balance:</span>
                             <span>{formatCurrency(remainingAmount)}</span>
                         </div>

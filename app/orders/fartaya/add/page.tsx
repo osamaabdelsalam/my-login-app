@@ -58,6 +58,7 @@ function AddFartayaOrderForm() {
 
                 if (!selectedOrderId && list.length > 0) {
                     setSelectedOrderId(list[0].id);
+                    setPrice(list[0].price || 2610);
                 }
             } catch (err) {
                 console.error("Failed to load in-house orders:", err);
@@ -67,6 +68,12 @@ function AddFartayaOrderForm() {
         }
         fetchInHouse();
     }, [selectedOrderId]);
+
+    useEffect(() => {
+        if (selectedOrder) {
+            setPrice(selectedOrder.price || 2610);
+        }
+    }, [selectedOrderId, inHouseOrders]);
 
     const selectedOrder = inHouseOrders.find((o) => o.id === selectedOrderId);
     const remainingBalance = Number(selectedOrder?.remaining_amount || 0);

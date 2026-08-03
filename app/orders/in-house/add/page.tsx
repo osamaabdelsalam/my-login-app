@@ -80,9 +80,10 @@ function AddInHouseOrderForm() {
     const bounceUnitsNum = Number(bounceUnits) || 0;
 
     const orderAmount = qtyNum * priceNum;
+    const netAmount = Math.max(0, (qtyNum - bounceUnitsNum) * priceNum);
     const totalUnits = qtyNum + bounceUnitsNum;
     const effectiveUnitPrice = totalUnits > 0 ? orderAmount / totalUnits : 0;
-    const remainingAmount = orderAmount;
+    const remainingAmount = netAmount;
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
