@@ -1,9 +1,10 @@
--- Medical Order Management System Database Schema & RLS Policies
+-- Medical Order Management System Database Schema & Add-On Migration Script
+-- Safe to run on both NEW and EXISTING databases without wiping or rebuilding existing data.
 
 -- 1. Enable UUID extension if not enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. Users Table (Extends auth.users)
+-- 2. Users Table (Extends auth.users for fixed 5-user access: 4 regular + 1 super admin)
 CREATE TABLE IF NOT EXISTS public.users (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT NOT NULL,
@@ -13,7 +14,7 @@ CREATE TABLE IF NOT EXISTS public.users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Trigger to automatically populate public.users on signup
+-- Trigger to automatically populate public.users when admin creates a user in Auth
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -24,7 +25,9 @@ BEGIN
         COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)),
         COALESCE(NEW.raw_user_meta_data->>'role', 'user')
     )
-    ON CONFLICT (id) DO NOTHING;
+    ON CONFLICT (id) DO UPDATE SET
+        email = EXCLUDED.email,
+        updated_at = NOW();
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -34,7 +37,17 @@ CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- 3. In-House Orders Table (with Product Selection: Hyalone=2610, Hyalubrix=1305, and Bounce as Units)
+-- Sync existing auth.users to public.users safely (Additive execution)
+INSERT INTO public.users (id, email, full_name, role)
+SELECT 
+    id, 
+    email, 
+    COALESCE(raw_user_meta_data->>'full_name', SPLIT_PART(email, '@', 1)), 
+    COALESCE(raw_user_meta_data->>'role', 'user')
+FROM auth.users
+ON CONFLICT (id) DO NOTHING;
+
+-- 3. In-House Orders Table (Product Selection: Hyalone=2610, Hyalubrix=1305, etc.)
 CREATE TABLE IF NOT EXISTS public.in_house_orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_number BIGSERIAL UNIQUE,
@@ -52,7 +65,13 @@ CREATE TABLE IF NOT EXISTS public.in_house_orders (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 4. Fartaya Doctors Table (Order Allocations)
+-- Ensure columns exist if adding to existing table
+ALTER TABLE public.in_house_orders ADD COLUMN IF NOT EXISTS bounce_units INT NOT NULL DEFAULT 0;
+ALTER TABLE public.in_house_orders ADD COLUMN IF NOT EXISTS bounce_amount NUMERIC(12, 2) NOT NULL DEFAULT 0;
+ALTER TABLE public.in_house_orders ADD COLUMN IF NOT EXISTS remaining_amount NUMERIC(12, 2) NOT NULL DEFAULT 0;
+ALTER TABLE public.in_house_orders ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- 4. Fartaya Doctors Table (Order Allocations & Invoicing)
 CREATE TABLE IF NOT EXISTS public.fartaya_drs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     original_order_id UUID NOT NULL REFERENCES public.in_house_orders(id) ON DELETE CASCADE,
@@ -77,6 +96,14 @@ CREATE TABLE IF NOT EXISTS public.fartaya_drs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Ensure columns exist if adding to existing table
+ALTER TABLE public.fartaya_drs ADD COLUMN IF NOT EXISTS deletion_status TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE public.fartaya_drs ADD COLUMN IF NOT EXISTS invoice_generated BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.fartaya_drs ADD COLUMN IF NOT EXISTS invoice_number TEXT;
+ALTER TABLE public.fartaya_drs ADD COLUMN IF NOT EXISTS invoice_date TIMESTAMPTZ;
+ALTER TABLE public.fartaya_drs ADD COLUMN IF NOT EXISTS invoice_url TEXT;
+ALTER TABLE public.fartaya_drs ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- 5. Audit Logs Table
 CREATE TABLE IF NOT EXISTS public.audit_logs (
@@ -140,10 +167,6 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('invoices', 'invoices', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Storage RLS Policies for Invoices Bucket
-CREATE POLICY "Public Read Invoices" ON storage.objects FOR SELECT USING (bucket_id = 'invoices');
-CREATE POLICY "Authenticated Upload Invoices" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'invoices' AND auth.uid() IS NOT NULL);
-
 -- 8. Indices for Performance
 CREATE INDEX IF NOT EXISTS idx_in_house_orders_user ON public.in_house_orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_in_house_orders_created ON public.in_house_orders(created_at DESC);
@@ -153,7 +176,7 @@ CREATE INDEX IF NOT EXISTS idx_fartaya_drs_created ON public.fartaya_drs(created
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON public.audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON public.audit_logs(created_at DESC);
 
--- 9. Row Level Security (RLS) Policies
+-- 9. Enable Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.in_house_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fartaya_drs ENABLE ROW LEVEL SECURITY;
@@ -170,21 +193,41 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Safe Policy Refresh (Drops existing policy before creating to prevent errors on existing DB)
+DROP POLICY IF EXISTS "Users view self or super admin" ON public.users;
+DROP POLICY IF EXISTS "Super admin manage users" ON public.users;
 CREATE POLICY "Users view self or super admin" ON public.users FOR SELECT USING (auth.uid() = id OR public.is_super_admin());
 CREATE POLICY "Super admin manage users" ON public.users FOR ALL USING (public.is_super_admin());
 
+DROP POLICY IF EXISTS "Users select all in_house_orders" ON public.in_house_orders;
+DROP POLICY IF EXISTS "Users insert own in_house_orders" ON public.in_house_orders;
+DROP POLICY IF EXISTS "Users update own in_house_orders" ON public.in_house_orders;
+DROP POLICY IF EXISTS "Users delete own in_house_orders" ON public.in_house_orders;
 CREATE POLICY "Users select all in_house_orders" ON public.in_house_orders FOR SELECT USING (TRUE);
 CREATE POLICY "Users insert own in_house_orders" ON public.in_house_orders FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_super_admin());
 CREATE POLICY "Users update own in_house_orders" ON public.in_house_orders FOR UPDATE USING (auth.uid() = user_id OR public.is_super_admin());
 CREATE POLICY "Users delete own in_house_orders" ON public.in_house_orders FOR DELETE USING (auth.uid() = user_id OR public.is_super_admin());
 
+DROP POLICY IF EXISTS "Users select all fartaya_drs" ON public.fartaya_drs;
+DROP POLICY IF EXISTS "Users insert own fartaya_drs" ON public.fartaya_drs;
+DROP POLICY IF EXISTS "Users update own fartaya_drs" ON public.fartaya_drs;
+DROP POLICY IF EXISTS "Users delete own fartaya_drs" ON public.fartaya_drs;
 CREATE POLICY "Users select all fartaya_drs" ON public.fartaya_drs FOR SELECT USING (TRUE);
 CREATE POLICY "Users insert own fartaya_drs" ON public.fartaya_drs FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_super_admin());
 CREATE POLICY "Users update own fartaya_drs" ON public.fartaya_drs FOR UPDATE USING (auth.uid() = user_id OR public.is_super_admin());
 CREATE POLICY "Users delete own fartaya_drs" ON public.fartaya_drs FOR DELETE USING (auth.uid() = user_id OR public.is_super_admin());
 
+DROP POLICY IF EXISTS "Super admin select audit_logs" ON public.audit_logs;
+DROP POLICY IF EXISTS "All authenticated users insert audit_logs" ON public.audit_logs;
 CREATE POLICY "Super admin select audit_logs" ON public.audit_logs FOR SELECT USING (public.is_super_admin());
 CREATE POLICY "All authenticated users insert audit_logs" ON public.audit_logs FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
+DROP POLICY IF EXISTS "All authenticated users select settings" ON public.settings;
+DROP POLICY IF EXISTS "Super admin write settings" ON public.settings;
 CREATE POLICY "All authenticated users select settings" ON public.settings FOR SELECT USING (auth.uid() IS NOT NULL);
 CREATE POLICY "Super admin write settings" ON public.settings FOR ALL USING (public.is_super_admin());
+
+DROP POLICY IF EXISTS "Public Read Invoices" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated Upload Invoices" ON storage.objects;
+CREATE POLICY "Public Read Invoices" ON storage.objects FOR SELECT USING (bucket_id = 'invoices');
+CREATE POLICY "Authenticated Upload Invoices" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'invoices' AND auth.uid() IS NOT NULL);
