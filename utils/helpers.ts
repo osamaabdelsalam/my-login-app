@@ -55,3 +55,32 @@ export function exportToCSV<T extends Record<string, unknown>>(
     link.click();
     document.body.removeChild(link);
 }
+
+export function getAuditActionDescription(actionType: string, newValues?: any, oldValues?: any): string {
+    switch (actionType) {
+        case "CREATE_IN_HOUSE_ORDER":
+            return "Order created in draft status";
+        case "EDIT_IN_HOUSE_ORDER":
+            return "Order details updated";
+        case "UPDATE_ORDER_STATUS":
+            return `Order status updated to '${newValues?.status || 'updated'}'`;
+        case "DELETE_IN_HOUSE_ORDER":
+            return "Order deleted (soft delete)";
+        case "CREATE_FARTAYA_ORDER":
+            return `Fartaya sub-order allocated to Dr. ${newValues?.fartaya_dr_name || 'N/A'}`;
+        case "UPDATE_PAYMENT_STATUS":
+            return `Payment status changed to ${newValues?.payment_status === 'paid' ? 'PAID' : 'UNPAID'}`;
+        case "REQUEST_DELETION":
+            return "Fartaya deletion requested";
+        case "APPROVE_DELETION":
+            return "Fartaya deletion approved by super admin";
+        case "REJECT_DELETION":
+            return "Fartaya deletion request rejected";
+        case "GENERATE_INVOICE":
+            return `Invoice generated (#${newValues?.invoice_number || 'N/A'})`;
+        case "CREATE_ORDER_TEMPLATE":
+            return "Order template created";
+        default:
+            return actionType.replace(/_/g, " ").toLowerCase();
+    }
+}

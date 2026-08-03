@@ -37,7 +37,7 @@ CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- Sync existing auth.users to public.users safely (Additive execution)
+-- Sync existing auth.users to public.users safely
 INSERT INTO public.users (id, email, full_name, role)
 SELECT 
     id, 
@@ -47,7 +47,7 @@ SELECT
 FROM auth.users
 ON CONFLICT (id) DO NOTHING;
 
--- 3. In-House Orders Table (Product Selection: Hyalone=2610, Hyalubrix=1305, etc.)
+-- 3. In-House Orders Table (Product Selection & Status Workflow)
 CREATE TABLE IF NOT EXISTS public.in_house_orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_number BIGSERIAL UNIQUE,
@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS public.in_house_orders (
     bounce_units INT NOT NULL DEFAULT 0 CHECK (bounce_units >= 0),
     bounce_amount NUMERIC(12, 2) NOT NULL DEFAULT 0 CHECK (bounce_amount >= 0),
     remaining_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending', 'approved', 'completed', 'cancelled')),
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS public.in_house_orders (
 ALTER TABLE public.in_house_orders ADD COLUMN IF NOT EXISTS bounce_units INT NOT NULL DEFAULT 0;
 ALTER TABLE public.in_house_orders ADD COLUMN IF NOT EXISTS bounce_amount NUMERIC(12, 2) NOT NULL DEFAULT 0;
 ALTER TABLE public.in_house_orders ADD COLUMN IF NOT EXISTS remaining_amount NUMERIC(12, 2) NOT NULL DEFAULT 0;
+ALTER TABLE public.in_house_orders ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft';
 ALTER TABLE public.in_house_orders ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- 4. Fartaya Doctors Table (Order Allocations & Invoicing)
@@ -105,7 +107,20 @@ ALTER TABLE public.fartaya_drs ADD COLUMN IF NOT EXISTS invoice_date TIMESTAMPTZ
 ALTER TABLE public.fartaya_drs ADD COLUMN IF NOT EXISTS invoice_url TEXT;
 ALTER TABLE public.fartaya_drs ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
 
--- 5. Audit Logs Table
+-- 5. Order Templates Table
+CREATE TABLE IF NOT EXISTS public.order_templates (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    dr_name TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    order_quantity INT NOT NULL CHECK (order_quantity > 0),
+    bounce_units INT NOT NULL DEFAULT 0 CHECK (bounce_units >= 0),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 6. Audit Logs Table
 CREATE TABLE IF NOT EXISTS public.audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
@@ -121,7 +136,7 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 6. Settings Table
+-- 7. Settings Table
 CREATE TABLE IF NOT EXISTS public.settings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     setting_key TEXT UNIQUE NOT NULL,
@@ -162,24 +177,28 @@ VALUES
 )
 ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value;
 
--- 7. Storage Bucket setup for Invoices
+-- 8. Storage Bucket setup for Invoices
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('invoices', 'invoices', true)
 ON CONFLICT (id) DO NOTHING;
 
--- 8. Indices for Performance
+-- 9. Indices for Performance
 CREATE INDEX IF NOT EXISTS idx_in_house_orders_user ON public.in_house_orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_in_house_orders_status ON public.in_house_orders(status);
 CREATE INDEX IF NOT EXISTS idx_in_house_orders_created ON public.in_house_orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fartaya_drs_original ON public.fartaya_drs(original_order_id);
 CREATE INDEX IF NOT EXISTS idx_fartaya_drs_user ON public.fartaya_drs(user_id);
 CREATE INDEX IF NOT EXISTS idx_fartaya_drs_created ON public.fartaya_drs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_order_templates_user ON public.order_templates(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON public.audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_record ON public.audit_logs(record_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON public.audit_logs(created_at DESC);
 
--- 9. Enable Row Level Security (RLS)
+-- 10. Enable Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.in_house_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fartaya_drs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
 
@@ -193,7 +212,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Safe Policy Refresh (Drops existing policy before creating to prevent errors on existing DB)
+-- Safe Policy Refresh
 DROP POLICY IF EXISTS "Users view self or super admin" ON public.users;
 DROP POLICY IF EXISTS "Super admin manage users" ON public.users;
 CREATE POLICY "Users view self or super admin" ON public.users FOR SELECT USING (auth.uid() = id OR public.is_super_admin());
@@ -216,6 +235,15 @@ CREATE POLICY "Users select all fartaya_drs" ON public.fartaya_drs FOR SELECT US
 CREATE POLICY "Users insert own fartaya_drs" ON public.fartaya_drs FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_super_admin());
 CREATE POLICY "Users update own fartaya_drs" ON public.fartaya_drs FOR UPDATE USING (auth.uid() = user_id OR public.is_super_admin());
 CREATE POLICY "Users delete own fartaya_drs" ON public.fartaya_drs FOR DELETE USING (auth.uid() = user_id OR public.is_super_admin());
+
+DROP POLICY IF EXISTS "Users select all templates" ON public.order_templates;
+DROP POLICY IF EXISTS "Users insert own templates" ON public.order_templates;
+DROP POLICY IF EXISTS "Users update own templates" ON public.order_templates;
+DROP POLICY IF EXISTS "Users delete own templates" ON public.order_templates;
+CREATE POLICY "Users select all templates" ON public.order_templates FOR SELECT USING (TRUE);
+CREATE POLICY "Users insert own templates" ON public.order_templates FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_super_admin());
+CREATE POLICY "Users update own templates" ON public.order_templates FOR UPDATE USING (auth.uid() = user_id OR public.is_super_admin());
+CREATE POLICY "Users delete own templates" ON public.order_templates FOR DELETE USING (auth.uid() = user_id OR public.is_super_admin());
 
 DROP POLICY IF EXISTS "Super admin select audit_logs" ON public.audit_logs;
 DROP POLICY IF EXISTS "All authenticated users insert audit_logs" ON public.audit_logs;

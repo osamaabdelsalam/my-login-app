@@ -16,6 +16,7 @@ import {
     LogOut,
     Menu,
     X,
+    Bookmark,
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -29,6 +30,7 @@ export default function Sidebar() {
         { name: "Add In-House Order", href: "/orders/in-house/add", icon: PlusCircle },
         { name: "Fartaya Orders", href: "/orders/fartaya", icon: Layers },
         { name: "Add Fartaya Order", href: "/orders/fartaya/add", icon: PlusCircle },
+        { name: "Order Templates", href: "/orders/templates", icon: Bookmark },
         { name: "My Profile", href: "/profile", icon: User },
     ];
 

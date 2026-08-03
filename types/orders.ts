@@ -11,6 +11,8 @@ export interface UserProfile {
 
 export type ProductName = 'Hyalone' | 'Hyalubrix' | string;
 
+export type OrderStatus = 'draft' | 'pending' | 'approved' | 'completed' | 'cancelled';
+
 export interface InHouseOrder {
     id: string;
     order_number: number;
@@ -22,6 +24,7 @@ export interface InHouseOrder {
     bounce_units: number;
     bounce_amount: number;
     remaining_amount: number;
+    status: OrderStatus;
     is_deleted: boolean;
     user_id: string;
     created_at: string;
@@ -51,6 +54,18 @@ export interface FartayaOrder {
     invoice_date?: string | null;
     invoice_url?: string | null;
     is_deleted: boolean;
+    user_id: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface OrderTemplate {
+    id: string;
+    name: string;
+    dr_name: string;
+    product_name: ProductName;
+    order_quantity: number;
+    bounce_units: number;
     user_id: string;
     created_at: string;
     updated_at: string;

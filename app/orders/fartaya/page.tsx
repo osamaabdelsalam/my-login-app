@@ -5,10 +5,11 @@ import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import EnhancedFartayaTable from "@/components/EnhancedFartayaTable";
+import OrderTimeline from "@/components/OrderTimeline";
 import { createClient } from "@/lib/supabase/client";
 import { InHouseOrder, FartayaOrder } from "@/types/orders";
 import { formatCurrency, formatDate } from "@/utils/helpers";
-import { PlusCircle, Layers, CreditCard, ChevronDown, ChevronUp } from "lucide-react";
+import { PlusCircle, Layers, CreditCard, ChevronDown, ChevronUp, Activity } from "lucide-react";
 
 export default function FartayaCombinedPage() {
     return (
@@ -29,6 +30,11 @@ function FartayaCombinedContent() {
     const [fartayaOrders, setFartayaOrders] = useState<FartayaOrder[]>([]);
     const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
     const [loading, setLoading] = useState(true);
+
+    // Timeline state
+    const [timelineOrderId, setTimelineOrderId] = useState<string>("");
+    const [timelineTitle, setTimelineTitle] = useState<string>("");
+    const [isTimelineOpen, setIsTimelineOpen] = useState(false);
 
     const supabase = createClient();
 
@@ -58,6 +64,12 @@ function FartayaCombinedContent() {
             ...prev,
             [orderId]: !prev[orderId],
         }));
+    }
+
+    function openTimeline(order: InHouseOrder) {
+        setTimelineOrderId(order.id);
+        setTimelineTitle(`Main Order #${order.order_number} (Dr. ${order.dr_name})`);
+        setIsTimelineOpen(true);
     }
 
     return (
@@ -122,10 +134,9 @@ function FartayaCombinedContent() {
                                 >
                                     {/* Parent Header */}
                                     <div
-                                        onClick={() => toggleExpand(parent.id)}
-                                        className="p-6 cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/5 transition"
+                                        className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/5 transition"
                                     >
-                                        <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-4 cursor-pointer" onClick={() => toggleExpand(parent.id)}>
                                             <button className="text-zinc-400">
                                                 {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                                             </button>
@@ -157,6 +168,13 @@ function FartayaCombinedContent() {
                                                 <div className="text-xs text-zinc-400">Fartaya Allocations</div>
                                                 <div className="font-semibold text-indigo-400 text-center">{allocations.length}</div>
                                             </div>
+                                            <button
+                                                onClick={() => openTimeline(parent)}
+                                                className="p-2 rounded-xl border border-white/10 bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 transition"
+                                                title="View Activity Timeline"
+                                            >
+                                                <Activity size={18} />
+                                            </button>
                                         </div>
                                     </div>
 
@@ -225,6 +243,14 @@ function FartayaCombinedContent() {
                 /* Collection Tab: EnhancedFartayaTable */
                 <EnhancedFartayaTable orders={fartayaOrders} onRefresh={loadData} />
             )}
+
+            {/* Timeline Modal */}
+            <OrderTimeline
+                orderId={timelineOrderId}
+                title={timelineTitle}
+                isOpen={isTimelineOpen}
+                onClose={() => setIsTimelineOpen(false)}
+            />
         </div>
     );
 }

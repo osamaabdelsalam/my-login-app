@@ -6,7 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
 import { createClient } from "@/lib/supabase/client";
-import { InHouseOrder } from "@/types/orders";
+import { InHouseOrder, OrderStatus } from "@/types/orders";
 import { logAudit } from "@/utils/auditLogger";
 import { formatCurrency } from "@/utils/helpers";
 import { Save, ArrowLeft } from "lucide-react";
@@ -36,6 +36,7 @@ function EditInHouseOrderForm() {
     const [quantity, setQuantity] = useState<number | "">(1);
     const [price, setPrice] = useState<number | "">(100);
     const [bounceUnits, setBounceUnits] = useState<number | "">(0);
+    const [status, setStatus] = useState<OrderStatus>("draft");
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -68,6 +69,7 @@ function EditInHouseOrderForm() {
                 setQuantity(order.order_quantity);
                 setPrice(order.price);
                 setBounceUnits(order.bounce_units || 0);
+                setStatus(order.status || "draft");
             } catch (err) {
                 console.error("Failed to load order:", err);
                 setError("Order not found or permission denied.");
@@ -86,6 +88,11 @@ function EditInHouseOrderForm() {
     const netAmount = Math.max(0, (qtyNum - bounceUnitsNum) * priceNum);
     const remainingAmount = netAmount;
 
+    // Allowed transitions depending on role
+    const availableStatuses: OrderStatus[] = isSuperAdmin()
+        ? ["draft", "pending", "approved", "completed", "cancelled"]
+        : ["draft", "pending"];
+
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
         if (!originalOrder) return;
@@ -102,6 +109,7 @@ function EditInHouseOrderForm() {
                 bounce_units: bounceUnitsNum,
                 bounce_amount: 0,
                 remaining_amount: remainingAmount,
+                status: status,
                 updated_at: new Date().toISOString(),
             };
 
@@ -113,6 +121,16 @@ function EditInHouseOrderForm() {
                 .single();
 
             if (updateError) throw updateError;
+
+            if (originalOrder.status !== status) {
+                await logAudit(
+                    "UPDATE_ORDER_STATUS",
+                    "in_house_orders",
+                    originalOrder.id,
+                    { status: originalOrder.status },
+                    { status: status }
+                );
+            }
 
             await logAudit("EDIT_IN_HOUSE_ORDER", "in_house_orders", originalOrder.id, originalOrder, data);
 
@@ -141,7 +159,7 @@ function EditInHouseOrderForm() {
             <h1 className="text-3xl font-bold tracking-tight text-white mb-2">
                 Edit Order #{originalOrder?.order_number}
             </h1>
-            <p className="text-zinc-400 text-sm mb-8">Update order details and recalculate balances</p>
+            <p className="text-zinc-400 text-sm mb-8">Update order details, recalculate balances, and manage status workflow</p>
 
             <div className="rounded-3xl border border-white/10 bg-white/5 p-8 backdrop-blur-xl shadow-2xl space-y-6">
                 <form onSubmit={handleSubmit} className="space-y-6">
@@ -223,6 +241,30 @@ function EditInHouseOrderForm() {
                         </div>
                     </div>
 
+                    {/* Status Workflow Selector */}
+                    <div>
+                        <label htmlFor="status" className="block text-sm font-medium text-zinc-300 mb-2">
+                            Order Workflow Status
+                        </label>
+                        <select
+                            id="status"
+                            value={status}
+                            onChange={(e) => setStatus(e.target.value as OrderStatus)}
+                            className="w-full rounded-xl border border-white/10 bg-zinc-900 px-4 py-3 text-white outline-none focus:border-white/30 capitalize font-medium"
+                        >
+                            {availableStatuses.map((st) => (
+                                <option key={st} value={st}>
+                                    {st.toUpperCase()}
+                                </option>
+                            ))}
+                        </select>
+                        {!isSuperAdmin() && (
+                            <p className="text-xs text-zinc-500 mt-1">
+                                Note: Regular users can transition orders between Draft and Pending. Approval requires Super Admin authorization.
+                            </p>
+                        )}
+                    </div>
+
                     {/* Calculated Summary Box */}
                     <div className="rounded-2xl border border-white/10 bg-black/40 p-5 space-y-2 text-sm">
                         <div className="flex justify-between text-zinc-400">
@@ -248,7 +290,7 @@ function EditInHouseOrderForm() {
                     <button
                         type="submit"
                         disabled={saving}
-                        className="inline-flex items-center gap-2 w-full justify-center rounded-xl bg-white px-6 py-3.5 font-medium text-zinc-950 transition hover:bg-zinc-200 disabled:opacity-50"
+                        className="inline-flex items-center gap-2 w-full justify-center rounded-xl bg-white px-6 py-3.5 font-semibold text-zinc-950 transition hover:bg-zinc-200 disabled:opacity-50"
                     >
                         <Save size={18} />
                         {saving ? "Saving Changes..." : "Save Order Changes"}
